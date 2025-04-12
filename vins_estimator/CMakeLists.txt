@@ -16,9 +16,16 @@ find_package(catkin REQUIRED COMPONENTS
     camera_models
     image_transport)
 
-find_package(OpenCV REQUIRED)
 
-# message(WARNING "OpenCV_VERSION: ${OpenCV_VERSION}")
+find_package(OpenCV 4 REQUIRED COMPONENTS core imgproc calib3d highgui features2d imgcodecs)
+
+
+message(STATUS "[vins_estimator] OpenCV: ${OpenCV_VERSION} at ${OpenCV_DIR}")
+
+    
+
+include_directories(${OpenCV_INCLUDE_DIRS})
+
 
 find_package(Ceres REQUIRED)
 

@@ -15,7 +15,15 @@ find_package(catkin REQUIRED COMPONENTS
     roslib
     )
 
-find_package(OpenCV)
+
+find_package(OpenCV 4 REQUIRED COMPONENTS core imgproc calib3d highgui features2d imgcodecs)
+
+
+message(STATUS "[loop_fusion] OpenCV: ${OpenCV_VERSION} at ${OpenCV_DIR}")
+    
+
+include_directories(${catkin_INCLUDE_DIRS} ${CERES_INCLUDE_DIRS} ${EIGEN3_INCLUDE_DIR} ${OpenCV_INCLUDE_DIRS})
+    
 
 
 find_package(Ceres REQUIRED)
