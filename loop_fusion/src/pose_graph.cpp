@@ -181,20 +181,34 @@ void PoseGraph::addKeyFrame(KeyFrame* cur_kf, bool flag_detect_loop)
 
     if (SAVE_LOOP_PATH)
     {
-        ofstream loop_path_file(VINS_RESULT_PATH, ios::app);
-        loop_path_file.setf(ios::fixed, ios::floatfield);
-        loop_path_file.precision(0);
-        loop_path_file << cur_kf->time_stamp * 1e9 << ",";
-        loop_path_file.precision(5);
-        loop_path_file  << P.x() << ","
-              << P.y() << ","
-              << P.z() << ","
-              << Q.w() << ","
-              << Q.x() << ","
-              << Q.y() << ","
-              << Q.z() << ","
-              << endl;
-        loop_path_file.close();
+        // ofstream loop_path_file(VINS_RESULT_PATH, ios::app);
+        // loop_path_file.setf(ios::fixed, ios::floatfield);
+        // loop_path_file.precision(0);
+        // loop_path_file << cur_kf->time_stamp * 1e9 << ",";
+        // loop_path_file.precision(5);
+        // loop_path_file  << P.x() << ","
+        //       << P.y() << ","
+        //       << P.z() << ","
+        //       << Q.w() << ","
+        //       << Q.x() << ","
+        //       << Q.y() << ","
+        //       << Q.z() << ","
+        //       << endl;
+        // loop_path_file.close();
+        ofstream loop_path_file2(VINS_RESULT_PATH, ios::app);
+        loop_path_file2.setf(ios::fixed,  ios::floatfield);
+        loop_path_file2.precision(9);
+        loop_path_file2 << cur_kf->time_stamp << " ";
+        loop_path_file2.precision(6);
+        loop_path_file2 << P.x() << " "
+                        << P.y() << " "
+                        << P.z() << " "
+                        << Q.x() << " "
+                        << Q.y() << " "
+                        << Q.z() << " "
+                        << Q.w() << endl;
+        loop_path_file2.close();
+
     }
     //draw local connection
     if (SHOW_S_EDGE)
@@ -828,20 +842,35 @@ void PoseGraph::updatePath()
 
         if (SAVE_LOOP_PATH)
         {
-            ofstream loop_path_file(VINS_RESULT_PATH, ios::app);
-            loop_path_file.setf(ios::fixed, ios::floatfield);
-            loop_path_file.precision(0);
-            loop_path_file << (*it)->time_stamp * 1e9 << ",";
-            loop_path_file.precision(5);
-            loop_path_file  << P.x() << ","
-                  << P.y() << ","
-                  << P.z() << ","
-                  << Q.w() << ","
-                  << Q.x() << ","
-                  << Q.y() << ","
-                  << Q.z() << ","
-                  << endl;
-            loop_path_file.close();
+            // ofstream loop_path_file(VINS_RESULT_PATH, ios::app);
+            // loop_path_file.setf(ios::fixed, ios::floatfield);
+            // loop_path_file.precision(0);
+            // loop_path_file << (*it)->time_stamp * 1e9 << ",";
+            // loop_path_file.precision(5);
+            // loop_path_file  << P.x() << ","
+            //       << P.y() << ","
+            //       << P.z() << ","
+            //       << Q.w() << ","
+            //       << Q.x() << ","
+            //       << Q.y() << ","
+            //       << Q.z() << ","
+            //       << endl;
+            // loop_path_file.close();
+            
+            ofstream loop_path_file2(VINS_RESULT_PATH, ios::app);
+            loop_path_file2.setf(ios::fixed,  ios::floatfield);
+            loop_path_file2.precision(9);
+            loop_path_file2 << (*it)->time_stamp << " ";
+            loop_path_file2.precision(6);
+            loop_path_file2 << P.x() << " "
+                            << P.y() << " "
+                            << P.z() << " "
+                            << Q.x() << " "
+                            << Q.y() << " "
+                            << Q.z() << " "
+                            << Q.w() << endl;
+            loop_path_file2.close();
+
         }
         //draw local connection
         if (SHOW_S_EDGE)
