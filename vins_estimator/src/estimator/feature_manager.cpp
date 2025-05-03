@@ -195,6 +195,7 @@ VectorXd FeatureManager::getDepthVector()
 }
 
 
+//直接線性變換（Direct Linear Transformation, DLT）演算法，並透過奇異值分解（Singular Value Decomposition, SVD）來求解
 void FeatureManager::triangulatePoint(Eigen::Matrix<double, 3, 4> &Pose0, Eigen::Matrix<double, 3, 4> &Pose1,
                         Eigen::Vector2d &point0, Eigen::Vector2d &point1, Eigen::Vector3d &point_3d)
 {
@@ -204,8 +205,10 @@ void FeatureManager::triangulatePoint(Eigen::Matrix<double, 3, 4> &Pose0, Eigen:
     design_matrix.row(2) = point1[0] * Pose1.row(2) - Pose1.row(0);
     design_matrix.row(3) = point1[1] * Pose1.row(2) - Pose1.row(1);
     Eigen::Vector4d triangulated_point;
+    // 对矩阵进行 SVD 分解，提取 V 矩阵的最后一列
     triangulated_point =
               design_matrix.jacobiSvd(Eigen::ComputeFullV).matrixV().rightCols<1>();
+    // 将齐次坐标转换为 3D 点坐标
     point_3d(0) = triangulated_point(0) / triangulated_point(3);
     point_3d(1) = triangulated_point(1) / triangulated_point(3);
     point_3d(2) = triangulated_point(2) / triangulated_point(3);
@@ -213,7 +216,7 @@ void FeatureManager::triangulatePoint(Eigen::Matrix<double, 3, 4> &Pose0, Eigen:
 
 
 bool FeatureManager::solvePoseByPnP(Eigen::Matrix3d &R, Eigen::Vector3d &P, 
-                                      vector<cv::Point2f> &pts2D, vector<cv::Point3f> &pts3D)
+                                      vector<cv::Point2f> &pts2D, vector<cv::Point3f> &pts3D, bool force_standard_pnp) // 新增的標誌參數
 {
     Eigen::Matrix3d R_initial;
     Eigen::Vector3d P_initial;
@@ -234,7 +237,21 @@ bool FeatureManager::solvePoseByPnP(Eigen::Matrix3d &R, Eigen::Vector3d &P,
     cv::eigen2cv(P_initial, t);
     cv::Mat K = (cv::Mat_<double>(3, 3) << 1, 0, 0, 0, 1, 0, 0, 0, 1);  
     bool pnp_succ;
-    pnp_succ = cv::solvePnP(pts3D, pts2D, K, D, rvec, t, 1);
+
+    // --- 根據標誌選擇 PnP 方法 ---
+    if (force_standard_pnp)
+    {
+        ROS_INFO("Motion suggests VTOL, using EPnP.");
+        pnp_succ = cv::solvePnP(pts3D, pts2D, K, D, rvec, t, cv::SOLVEPNP_EPNP);
+    }
+    else
+    {
+        ROS_INFO("Attempting PnP with IPPE.");
+        pnp_succ = cv::solvePnP(pts3D, pts2D, K, D, rvec, t, cv::SOLVEPNP_IPPE);
+    }
+    // --- 方法選擇結束 ---
+
+    // pnp_succ = cv::solvePnP(pts3D, pts2D, K, D, rvec, t, cv::SOLVEPNP_IPPE); //1 change to cv::SOLVEPNP_IPPE
     //pnp_succ = solvePnPRansac(pts3D, pts2D, K, D, rvec, t, true, 100, 8.0 / focalLength, 0.99, inliers);
 
     if(!pnp_succ)
@@ -257,16 +274,55 @@ bool FeatureManager::solvePoseByPnP(Eigen::Matrix3d &R, Eigen::Vector3d &P,
 }
 
 void FeatureManager::initFramePoseByPnP(int frameCnt, Vector3d Ps[], Matrix3d Rs[], Vector3d tic[], Matrix3d ric[])
-{
+{//Ps、Rs、Vs： bk相对 世界坐标系w 的 位置、姿态 和速度； k代表的是与bk对应的帧
+
+    // --- 運動模式檢測 ---
+    bool standard_pnp = false;
+    // 需要至少 frame 0, 1, 2 的位姿來判斷 frame 1 到 frame 2 的運動
+    if (frameCnt >= 2)
+    {
+        // **需要調優的閾值**
+        const double VERTICAL_MOTION_RATIO_THRESHOLD = 0.85; // 例如，垂直位移佔總位移的85%以上
+        const double MIN_MOTION_THRESHOLD = 0.01; // 忽略非常小的移動 (單位：公尺)
+
+        Eigen::Vector3d p_curr = Ps[frameCnt - 1]; // 上一時刻的位姿
+        Eigen::Vector3d p_prev = Ps[frameCnt - 2]; // 上上一時刻的位姿
+        Eigen::Vector3d delta_p = p_curr - p_prev;
+
+        double total_dist = delta_p.norm();
+        double vertical_dist = std::abs(delta_p.z()); // 假設世界坐標 Z 軸為垂直方向
+
+        if (total_dist > MIN_MOTION_THRESHOLD) // 只有當移動足夠大時才判斷
+        {
+            double vertical_ratio = vertical_dist / total_dist;
+            if (vertical_ratio > VERTICAL_MOTION_RATIO_THRESHOLD)
+            {
+                ROS_INFO("Frame %d: Potential VTOL motion detected (Vertical Ratio: %.3f > %.3f). Forcing standard PnP.",
+                         frameCnt, vertical_ratio, VERTICAL_MOTION_RATIO_THRESHOLD);
+                standard_pnp = true;
+            }
+             else
+            {
+                 ROS_INFO("Frame %d: Motion not primarily vertical (Vertical Ratio: %.3f <= %.3f). Allowing IPPE.",
+                          frameCnt, vertical_ratio, VERTICAL_MOTION_RATIO_THRESHOLD);
+            }
+        }
+        else
+        {
+             ROS_INFO("Frame %d: Motion distance (%.4f m) too small to determine type robustly. Allowing IPPE.", frameCnt, total_dist);
+        }
+    }
+    // --- 運動模式檢測結束 ---
 
     if(frameCnt > 0)
     {
-        vector<cv::Point2f> pts2D;
+        vector<cv::Point2f> pts2D; //相机归一化坐标系下的2D点
         vector<cv::Point3f> pts3D;
-        for (auto &it_per_id : feature)
+        for (auto &it_per_id : feature)//遍历滑窗内所有的特征点
         {
-            if (it_per_id.estimated_depth > 0)
+            if (it_per_id.estimated_depth > 0)//满足特征点深度大于0
             {
+                //it_per_id.start_frame：特征点被第一次观测到时，对应滑动窗口的帧号
                 int index = frameCnt - it_per_id.start_frame;
                 if((int)it_per_id.feature_per_frame.size() >= index + 1)
                 {
@@ -286,7 +342,7 @@ void FeatureManager::initFramePoseByPnP(int frameCnt, Vector3d Ps[], Matrix3d Rs
         RCam = Rs[frameCnt - 1] * ric[0];
         PCam = Rs[frameCnt - 1] * tic[0] + Ps[frameCnt - 1];
 
-        if(solvePoseByPnP(RCam, PCam, pts2D, pts3D))
+        if(solvePoseByPnP(RCam, PCam, pts2D, pts3D, standard_pnp))
         {
             // trans to w_T_imu
             Rs[frameCnt] = RCam * ric[0].transpose(); 
@@ -299,6 +355,10 @@ void FeatureManager::initFramePoseByPnP(int frameCnt, Vector3d Ps[], Matrix3d Rs
     }
 }
 
+
+//使用两种方法来计算特征点深度，第一种是双目或多帧三角化
+//第二种是svd分解来计算深度第二个方法的目的是提供一种冗余机制，以确保即使第一个方法未能提供可靠的深度估计，也能通过SVD提供一个合理的估计值。
+//SVD方法通过最小化重投影误差来估计深度，具有较强的鲁棒性，特别是在噪声存在的情况下
 void FeatureManager::triangulate(int frameCnt, Vector3d Ps[], Matrix3d Rs[], Vector3d tic[], Matrix3d ric[])
 {
     for (auto &it_per_id : feature)
@@ -306,16 +366,21 @@ void FeatureManager::triangulate(int frameCnt, Vector3d Ps[], Matrix3d Rs[], Vec
         if (it_per_id.estimated_depth > 0)
             continue;
 
+        // 如果是立体相机且该特征点有立体匹配信息
         if(STEREO && it_per_id.feature_per_frame[0].is_stereo)
         {
             int imu_i = it_per_id.start_frame;
+            // 构建左相机的投影矩阵
             Eigen::Matrix<double, 3, 4> leftPose;
+            //计算相机的平移向量，通过将 IMU 的平移量转换到相机坐标系中得到相机的平移向量。
             Eigen::Vector3d t0 = Ps[imu_i] + Rs[imu_i] * tic[0];
+            //计算相机的旋转矩阵，通过将 IMU 的旋转矩阵转换到相机坐标系中得到相机的旋转矩阵。
             Eigen::Matrix3d R0 = Rs[imu_i] * ric[0];
             leftPose.leftCols<3>() = R0.transpose();
             leftPose.rightCols<1>() = -R0.transpose() * t0;
             //cout << "left pose " << leftPose << endl;
 
+            // 构建右相机的投影矩阵
             Eigen::Matrix<double, 3, 4> rightPose;
             Eigen::Vector3d t1 = Ps[imu_i] + Rs[imu_i] * tic[1];
             Eigen::Matrix3d R1 = Rs[imu_i] * ric[1];
@@ -323,6 +388,7 @@ void FeatureManager::triangulate(int frameCnt, Vector3d Ps[], Matrix3d Rs[], Vec
             rightPose.rightCols<1>() = -R1.transpose() * t1;
             //cout << "right pose " << rightPose << endl;
 
+            // 获取左、右相机的特征点坐标
             Eigen::Vector2d point0, point1;
             Eigen::Vector3d point3d;
             point0 = it_per_id.feature_per_frame[0].point.head(2);
@@ -330,6 +396,7 @@ void FeatureManager::triangulate(int frameCnt, Vector3d Ps[], Matrix3d Rs[], Vec
             //cout << "point0 " << point0.transpose() << endl;
             //cout << "point1 " << point1.transpose() << endl;
 
+            // 三角化计算特征点的3D坐标
             triangulatePoint(leftPose, rightPose, point0, point1, point3d);
             Eigen::Vector3d localPoint;
             localPoint = leftPose.leftCols<3>() * point3d + leftPose.rightCols<1>();
@@ -345,15 +412,18 @@ void FeatureManager::triangulate(int frameCnt, Vector3d Ps[], Matrix3d Rs[], Vec
             */
             continue;
         }
+        // 如果特征点在多帧中被观测到
         else if(it_per_id.feature_per_frame.size() > 1)
         {
+            // 构建初始帧的投影矩阵
             int imu_i = it_per_id.start_frame;
             Eigen::Matrix<double, 3, 4> leftPose;
             Eigen::Vector3d t0 = Ps[imu_i] + Rs[imu_i] * tic[0];
             Eigen::Matrix3d R0 = Rs[imu_i] * ric[0];
             leftPose.leftCols<3>() = R0.transpose();
             leftPose.rightCols<1>() = -R0.transpose() * t0;
-
+            
+            // 构建下一帧的投影矩阵
             imu_i++;
             Eigen::Matrix<double, 3, 4> rightPose;
             Eigen::Vector3d t1 = Ps[imu_i] + Rs[imu_i] * tic[0];
@@ -369,6 +439,8 @@ void FeatureManager::triangulate(int frameCnt, Vector3d Ps[], Matrix3d Rs[], Vec
             Eigen::Vector3d localPoint;
             localPoint = leftPose.leftCols<3>() * point3d + leftPose.rightCols<1>();
             double depth = localPoint.z();
+
+            // 判断深度是否有效并进行更新
             if (depth > 0)
                 it_per_id.estimated_depth = depth;
             else
@@ -380,7 +452,13 @@ void FeatureManager::triangulate(int frameCnt, Vector3d Ps[], Matrix3d Rs[], Vec
             */
             continue;
         }
+
+
+        //這是一顆「剛出生」的特徵點：目前只有第一幀左影像觀測，右影像也沒有
+        // 更新特征点在帧中的观测数量
         it_per_id.used_num = it_per_id.feature_per_frame.size();
+
+        //只有在至少有4个观测（帧）中出现的特征点才会被处理。
         if (it_per_id.used_num < 4)
             continue;
 
