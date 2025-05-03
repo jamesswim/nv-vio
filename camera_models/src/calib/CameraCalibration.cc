@@ -516,10 +516,10 @@ CameraCalibration::optimize(CameraPtr& camera,
     options.max_num_iterations = 1000;
     options.num_threads = 1;
 
-    if (m_verbose)
-    {
-        options.minimizer_progress_to_stdout = true;
-    }
+    // if (m_verbose)
+    // {
+    //     options.minimizer_progress_to_stdout = true;
+    // }
 
     ceres::Solver::Summary summary;
     ceres::Solve(options, &problem, &summary);
