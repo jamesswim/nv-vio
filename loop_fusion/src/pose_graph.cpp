@@ -74,6 +74,7 @@ void PoseGraph::addKeyFrame(KeyFrame* cur_kf, bool flag_detect_loop)
     {
         sequence_cnt++;
         sequence_loop.push_back(0);
+        // 如果发生跳变复位一些变量
         w_t_vio = Eigen::Vector3d(0, 0, 0);
         w_r_vio = Eigen::Matrix3d::Identity();
         m_drift.lock();
@@ -82,11 +83,14 @@ void PoseGraph::addKeyFrame(KeyFrame* cur_kf, bool flag_detect_loop)
         m_drift.unlock();
     }
     
-    cur_kf->getVioPose(vio_P_cur, vio_R_cur);
+    // 更新一下VIO位姿
+    // 这里vio_P_cur和vio_R_cur我们要搞清楚是word->i帧下的坐标，更新到i+1下的旋转和平移
+    cur_kf->getVioPose(vio_P_cur, vio_R_cur);//代表的是 VIO 座標系下，目前關鍵影格相對於 VIO 起始點的姿態。
+    //update 回环修正后的消除累计误差的位姿
     vio_P_cur = w_r_vio * vio_P_cur + w_t_vio;
     vio_R_cur = w_r_vio *  vio_R_cur;
     cur_kf->updateVioPose(vio_P_cur, vio_R_cur);
-    cur_kf->index = global_index;
+    cur_kf->index = global_index;// 赋值索引
     global_index++;
 	int loop_index = -1;
     if (flag_detect_loop)
@@ -355,12 +359,13 @@ int PoseGraph::detectLoop(KeyFrame* keyframe, int frame_index)
         int feature_num = keyframe->keypoints.size();
         cv::resize(keyframe->image, compressed_image, cv::Size(376, 240));
         putText(compressed_image, "feature_num:" + to_string(feature_num), cv::Point2f(10, 10), cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar(255));
-        image_pool[frame_index] = compressed_image;
+        image_pool[frame_index] = compressed_image; //image_pool 用於後續視覺化顯示可能的迴圈匹配結果
     }
     TicToc tmp_t;
     //first query; then add this frame into database!
     QueryResults ret;
     TicToc t_query;
+    //step1 詞袋資料庫查詢，查询结果是ret(包含可能的候選迴圈影格及其分數)，最多回傳 4 個最相似的候選影格，在距離目前影格至少 50 幀之前（更早）的影格中進行迴圈檢測
     db.query(keyframe->brief_descriptors, ret, 4, frame_index - 50);
     //printf("query time: %f", t_query.toc());
     //cout << "Searching for Image " << frame_index << ". " << ret << endl;
@@ -390,6 +395,7 @@ int PoseGraph::detectLoop(KeyFrame* keyframe, int frame_index)
         }
     }
     // a good match with its nerghbour
+    //注意 保证其中的一个关键帧的得分要大于0.05 最少备选项大于1
     if (ret.size() >= 1 &&ret[0].Score > 0.05)
         for (unsigned int i = 1; i < ret.size(); i++)
         {

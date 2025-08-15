@@ -192,6 +192,7 @@ void pose_callback(const nav_msgs::Odometry::ConstPtr &pose_msg)
 void vio_callback(const nav_msgs::Odometry::ConstPtr &pose_msg)
 {
     //ROS_INFO("vio_callback!");
+    // 接收位姿訊息並提取資訊
     Vector3d vio_t(pose_msg->pose.pose.position.x, pose_msg->pose.pose.position.y, pose_msg->pose.pose.position.z);
     Quaterniond vio_q;
     vio_q.w() = pose_msg->pose.pose.orientation.w;
@@ -199,12 +200,15 @@ void vio_callback(const nav_msgs::Odometry::ConstPtr &pose_msg)
     vio_q.y() = pose_msg->pose.pose.orientation.y;
     vio_q.z() = pose_msg->pose.pose.orientation.z;
 
+    // 進行座標系轉換（VIO到世界座標系）
     vio_t = posegraph.w_r_vio * vio_t + posegraph.w_t_vio;
     vio_q = posegraph.w_r_vio *  vio_q;
 
+    // 加入漂移（drift）校正量
     vio_t = posegraph.r_drift * vio_t + posegraph.t_drift;
     vio_q = posegraph.r_drift * vio_q;
 
+    // 發布調整後的 Odometry 訊息
     nav_msgs::Odometry odometry;
     odometry.header = pose_msg->header;
     odometry.header.frame_id = "world";
@@ -217,6 +221,7 @@ void vio_callback(const nav_msgs::Odometry::ConstPtr &pose_msg)
     odometry.pose.pose.orientation.w = vio_q.w();
     pub_odometry_rect.publish(odometry);
 
+    // 相機姿態視覺化
     Vector3d vio_t_cam;
     Quaterniond vio_q_cam;
     vio_t_cam = vio_t + vio_q * tic;
@@ -256,12 +261,12 @@ void process()
         {
             if (image_buf.front()->header.stamp.toSec() > pose_buf.front()->header.stamp.toSec())
             {
-                pose_buf.pop();
+                pose_buf.pop(); // 影像訊息時間較新，丟棄舊的pose訊息
                 printf("throw pose at beginning\n");
             }
             else if (image_buf.front()->header.stamp.toSec() > point_buf.front()->header.stamp.toSec())
             {
-                point_buf.pop();
+                point_buf.pop(); // 影像訊息時間較新，丟棄舊的點雲訊息
                 printf("throw point at beginning\n");
             }
             else if (image_buf.back()->header.stamp.toSec() >= pose_buf.front()->header.stamp.toSec() 
@@ -284,13 +289,14 @@ void process()
         }
         m_buf.unlock();
 
+        // 如果成功找到同步訊息，則進行後續處理
         if (pose_msg != NULL)
         {
             //printf(" pose time %f \n", pose_msg->header.stamp.toSec());
             //printf(" point time %f \n", point_msg->header.stamp.toSec());
             //printf(" image time %f \n", image_msg->header.stamp.toSec());
             // skip fisrt few
-            if (skip_first_cnt < SKIP_FIRST_CNT)
+            if (skip_first_cnt < SKIP_FIRST_CNT)    // 跳過初始幾幀不穩定資料
             {
                 skip_first_cnt++;
                 continue;
@@ -331,6 +337,8 @@ void process()
                                      pose_msg->pose.pose.orientation.x,
                                      pose_msg->pose.pose.orientation.y,
                                      pose_msg->pose.pose.orientation.z).toRotationMatrix();
+
+            // 判斷是否需要新增關鍵影格 (避免過於密集的影格)
             if((T - last_t).norm() > SKIP_DIS)
             {
                 vector<cv::Point3f> point_3d; 
@@ -338,6 +346,7 @@ void process()
                 vector<cv::Point2f> point_2d_normal;
                 vector<double> point_id;
 
+                // 解析PointCloud點雲資料
                 for (unsigned int i = 0; i < point_msg->points.size(); i++)
                 {
                     cv::Point3f p_3d;
@@ -360,6 +369,7 @@ void process()
                     //printf("u %f, v %f \n", p_2d_uv.x, p_2d_uv.y);
                 }
 
+                // 建立新KeyFrame物件並加入pose graph
                 KeyFrame* keyframe = new KeyFrame(pose_msg->header.stamp.toSec(), frame_index, T, R, image,
                                    point_3d, point_2d_uv, point_2d_normal, point_id, sequence);   
                 m_process.lock();
@@ -431,6 +441,7 @@ int main(int argc, char **argv)
     std::string IMAGE_TOPIC;
     int LOAD_PREVIOUS_POSE_GRAPH;
 
+    //与Mono不同直接不要判断是否回环
     ROW = fsSettings["image_height"];
     COL = fsSettings["image_width"];
     std::string pkg_path = ros::package::getPath("loop_fusion");
@@ -478,11 +489,18 @@ int main(int argc, char **argv)
         load_flag = 1;
     }
 
+    
+    //vio回调函数根据pose_msg中的位姿得到imu位姿和cam位姿
     ros::Subscriber sub_vio = n.subscribe("/vins_estimator/odometry", 2000, vio_callback);
+    //将image_msg放入到image_buf中，同时更具时间挫检测是否有新的图像序列
     ros::Subscriber sub_image = n.subscribe(IMAGE_TOPIC, 2000, image_callback);
+    //图像位姿回调函数，把pose_msg放入到pose_buf
     ros::Subscriber sub_pose = n.subscribe("/vins_estimator/keyframe_pose", 2000, pose_callback);
+    //imu的外参回调函数
     ros::Subscriber sub_extrinsic = n.subscribe("/vins_estimator/extrinsic", 2000, extrinsic_callback);
+    //地图的点云，存放到point_buf
     ros::Subscriber sub_point = n.subscribe("/vins_estimator/keyframe_point", 2000, point_callback);
+    //可视化处理
     ros::Subscriber sub_margin_point = n.subscribe("/vins_estimator/margin_cloud", 2000, margin_point_callback);
 
     pub_match_img = n.advertise<sensor_msgs::Image>("match_image", 1000);

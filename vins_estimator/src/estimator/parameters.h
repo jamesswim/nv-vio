@@ -63,6 +63,7 @@ extern int MIN_DIST;
 extern double F_THRESHOLD;
 extern int SHOW_TRACK;
 extern int FLOW_BACK;
+extern bool USE_DYNAMIC_WEIGHTING; // 【新增】宣告動態加權開關
 
 void readParameters(std::string config_file);
 

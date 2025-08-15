@@ -22,11 +22,25 @@ static void reduceVector(vector<Derived> &v, vector<uchar> status)
 }
 
 // create keyframe online
+// 创建一个KF对象，计算已有特征点的描述子，同时额外提取fast角点并计算描述子
+
+/*
+* time_stamp KF的时间戳
+ * index KF的索引
+ * vio_T_w_i vio节点中的位姿
+ * vio_R_w_i 
+ * image 对应的原图
+ * point_3d KF对应VIO节点中的世界坐标
+ * point_2d_uv 像素坐标
+ * point_2d_norm 归一化相机坐标
+ * point_id 地图点的idx
+ * sequence 序列号
+ */
 KeyFrame::KeyFrame(double _time_stamp, int _index, Vector3d &_vio_T_w_i, Matrix3d &_vio_R_w_i, cv::Mat &_image,
 		           vector<cv::Point3f> &_point_3d, vector<cv::Point2f> &_point_2d_uv, vector<cv::Point2f> &_point_2d_norm,
 		           vector<double> &_point_id, int _sequence)
 {
-	time_stamp = _time_stamp;
+	time_stamp = _time_stamp;//传递时间戳  单目相机的时间戳使用cam0的时间戳
 	index = _index;
 	vio_T_w_i = _vio_T_w_i;
 	vio_R_w_i = _vio_R_w_i;
@@ -35,16 +49,16 @@ KeyFrame::KeyFrame(double _time_stamp, int _index, Vector3d &_vio_T_w_i, Matrix3
 	origin_vio_T = vio_T_w_i;		
 	origin_vio_R = vio_R_w_i;
 	image = _image.clone();
-	cv::resize(image, thumbnail, cv::Size(80, 60));
-	point_3d = _point_3d;
-	point_2d_uv = _point_2d_uv;
-	point_2d_norm = _point_2d_norm;
+	cv::resize(image, thumbnail, cv::Size(80, 60)); // 这个缩小尺寸应该是为了可视化
+	point_3d = _point_3d; //特征点的世界坐标
+	point_2d_uv = _point_2d_uv; //像素坐标
+	point_2d_norm = _point_2d_norm; //归一化相机坐标
 	point_id = _point_id;
 	has_loop = false;
 	loop_index = -1;
 	has_fast_point = false;
 	loop_info << 0, 0, 0, 0, 0, 0, 0, 0;
-	sequence = _sequence;
+	sequence = _sequence;	//注意序列号暂时和单目相机同步
 	computeWindowBRIEFPoint();
 	computeBRIEFPoint();
 	if(!DEBUG_IMAGE)
@@ -85,26 +99,32 @@ KeyFrame::KeyFrame(double _time_stamp, int _index, Vector3d &_vio_T_w_i, Matrix3
 
 void KeyFrame::computeWindowBRIEFPoint()
 {
+	// 定义一个描述子计算的对象
 	BriefExtractor extractor(BRIEF_PATTERN_FILE.c_str());
+	//point_2d_uv检测到角点的像素坐标，这循环相当于转化为opencv之后的keypoint
 	for(int i = 0; i < (int)point_2d_uv.size(); i++)
 	{
 	    cv::KeyPoint key;
 	    key.pt = point_2d_uv[i];
 	    window_keypoints.push_back(key);
 	}
+	//注意window_keypoints为当前帧的特征点
 	extractor(image, window_keypoints, window_brief_descriptors);
 }
 
+
+// 额外提取fast特征点并计算描述子
 void KeyFrame::computeBRIEFPoint()
 {
+	//同样的步骤提取描述子文件
 	BriefExtractor extractor(BRIEF_PATTERN_FILE.c_str());
-	const int fast_th = 20; // corner detector response threshold
+	const int fast_th = 20; //threshold 是一個強度差值門檻，用來判斷一個像素是否為角點。
 	if(1)
-		cv::FAST(image, keypoints, fast_th, true);
+		cv::FAST(image, keypoints, fast_th, true); //keypoints:輸出的角點位置
 	else
 	{
-		vector<cv::Point2f> tmp_pts;
-		cv::goodFeaturesToTrack(image, tmp_pts, 500, 0.01, 10);
+		vector<cv::Point2f> tmp_pts; //儲存輸出角點的向量
+		cv::goodFeaturesToTrack(image, tmp_pts, 500, 0.01, 10);	//最多回傳 500 個角點, 角點品質門檻（越小 → 偵測越多）, 任兩角點間的最小距離（像素）
 		for(int i = 0; i < (int)tmp_pts.size(); i++)
 		{
 		    cv::KeyPoint key;
@@ -112,17 +132,20 @@ void KeyFrame::computeBRIEFPoint()
 		    keypoints.push_back(key);
 		}
 	}
-	extractor(image, keypoints, brief_descriptors);
-	for (int i = 0; i < (int)keypoints.size(); i++)
+	extractor(image, keypoints, brief_descriptors); //提取描述子
+	for (int i = 0; i < (int)keypoints.size(); i++) //计算归一化坐标
 	{
 		Eigen::Vector3d tmp_p;
-		m_camera->liftProjective(Eigen::Vector2d(keypoints[i].pt.x, keypoints[i].pt.y), tmp_p);
+		m_camera->liftProjective(Eigen::Vector2d(keypoints[i].pt.x, keypoints[i].pt.y), tmp_p); //將2D像素座標反投影到3D歸一化平面上
 		cv::KeyPoint tmp_norm;
 		tmp_norm.pt = cv::Point2f(tmp_p.x()/tmp_p.z(), tmp_p.y()/tmp_p.z());
 		keypoints_norm.push_back(tmp_norm);
 	}
 }
 
+///  im 输入图像
+///  keys 角点
+///  descriptors 输出的描述子
 void BriefExtractor::operator() (const cv::Mat &im, vector<cv::KeyPoint> &keys, vector<BRIEF::bitset> &descriptors) const
 {
   m_brief.compute(im, keys, descriptors);

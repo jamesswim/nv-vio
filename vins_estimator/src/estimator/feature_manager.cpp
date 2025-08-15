@@ -241,12 +241,12 @@ bool FeatureManager::solvePoseByPnP(Eigen::Matrix3d &R, Eigen::Vector3d &P,
     // --- 根據標誌選擇 PnP 方法 ---
     if (force_standard_pnp)
     {
-        ROS_INFO("Motion suggests VTOL, using EPnP.");
+        ROS_INFO("Standard motion detected, using EPnP.");
         pnp_succ = cv::solvePnP(pts3D, pts2D, K, D, rvec, t, cv::SOLVEPNP_EPNP);
     }
     else
     {
-        ROS_INFO("Attempting PnP with IPPE.");
+        ROS_INFO("VTOL motion suggested, attempting PnP with IPPE.");
         pnp_succ = cv::solvePnP(pts3D, pts2D, K, D, rvec, t, cv::SOLVEPNP_IPPE);
     }
     // --- 方法選擇結束 ---
@@ -299,12 +299,13 @@ void FeatureManager::initFramePoseByPnP(int frameCnt, Vector3d Ps[], Matrix3d Rs
             {
                 ROS_INFO("Frame %d: Potential VTOL motion detected (Vertical Ratio: %.3f > %.3f). Forcing standard PnP.",
                          frameCnt, vertical_ratio, VERTICAL_MOTION_RATIO_THRESHOLD);
-                standard_pnp = true;
+                // standard_pnp = true;
             }
              else
             {
                  ROS_INFO("Frame %d: Motion not primarily vertical (Vertical Ratio: %.3f <= %.3f). Allowing IPPE.",
                           frameCnt, vertical_ratio, VERTICAL_MOTION_RATIO_THRESHOLD);
+                standard_pnp = true;
             }
         }
         else
@@ -342,6 +343,7 @@ void FeatureManager::initFramePoseByPnP(int frameCnt, Vector3d Ps[], Matrix3d Rs
         RCam = Rs[frameCnt - 1] * ric[0];
         PCam = Rs[frameCnt - 1] * tic[0] + Ps[frameCnt - 1];
 
+        // if(solvePoseByPnP(RCam, PCam, pts2D, pts3D, true))
         if(solvePoseByPnP(RCam, PCam, pts2D, pts3D, standard_pnp))
         {
             // trans to w_T_imu

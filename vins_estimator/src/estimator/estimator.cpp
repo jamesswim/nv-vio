@@ -1043,29 +1043,42 @@ bool Estimator::failureDetection()
 
 void Estimator::optimization()
 {
+    // 计时器，用于测量整体和准备阶段的时间
     TicToc t_whole, t_prepare;
+    // 将数据从Eigen类型转换为double数组，以方便ceres库处理
     vector2double();
 
     ceres::Problem problem;
     ceres::LossFunction *loss_function;
     //loss_function = NULL;
-    loss_function = new ceres::HuberLoss(1.0);
-    //loss_function = new ceres::CauchyLoss(1.0 / FOCAL_LENGTH);
+    loss_function = new ceres::HuberLoss(1.5);
+    // loss_function = new ceres::CauchyLoss(1.0 / FOCAL_LENGTH);
     //ceres::LossFunction* loss_function = new ceres::HuberLoss(1.0);
+
+    // 为每一帧的姿态添加参数块，并指定局部参数化
     for (int i = 0; i < frame_count + 1; i++)
     {
+        //创建局部参数化对象：PoseLocalParameterization是一个用户定义的类，继承自Ceres的LocalParameterization类，用于定义姿态参数的局部参数化规则
         ceres::LocalParameterization *local_parameterization = new PoseLocalParameterization();
+        //添加姿态参数块：para_Pose[i]表示第i帧的姿态参数。SIZE_POSE是姿态参数块的大小，local_parameterization是上一步创建的局部参数化对象，确保姿态参数在优化过程中保持合法
         problem.AddParameterBlock(para_Pose[i], SIZE_POSE, local_parameterization);
+        //添加速度和偏置参数块（如果使用IMU）
         if(USE_IMU)
             problem.AddParameterBlock(para_SpeedBias[i], SIZE_SPEEDBIAS);
     }
+    // 如果不使用IMU，则固定第一帧的姿态参数块
     if(!USE_IMU)
         problem.SetParameterBlockConstant(para_Pose[0]);
 
+    // 为每个摄像头外参添加参数块，并根据情况固定或估计外参
+    //循环遍历每个相机
     for (int i = 0; i < NUM_OF_CAM; i++)
     {
         ceres::LocalParameterization *local_parameterization = new PoseLocalParameterization();
         problem.AddParameterBlock(para_Ex_Pose[i], SIZE_POSE, local_parameterization);
+        //根据条件决定是否估计或固定外参参数：ESTIMATE_EXTRINSIC：是否估计外参参数的标志。
+        //frame_count == WINDOW_SIZE：当前帧数是否达到了窗口大小、Vs[0].norm() > 0.2：第一个速度向量的模是否大于0.2
+        //openExEstimation：外参估计是否已经打开
         if ((ESTIMATE_EXTRINSIC && frame_count == WINDOW_SIZE && Vs[0].norm() > 0.2) || openExEstimation)
         {
             //ROS_INFO("estimate extinsic param");
@@ -1077,92 +1090,134 @@ void Estimator::optimization()
             problem.SetParameterBlockConstant(para_Ex_Pose[i]);
         }
     }
+    // 添加时间延迟参数块
+    //将时间延迟参数块para_Td[0]添加到优化问题中，参数块大小为1
     problem.AddParameterBlock(para_Td[0], 1);
 
     if (!ESTIMATE_TD || Vs[0].norm() < 0.2)
+        //将时间延迟参数块固定，使其在优化过程中保持不变
         problem.SetParameterBlockConstant(para_Td[0]);
 
+    // 如果有上一次边缘化信息且有效，则构建新的边缘化因子并添加到优化问题中
     if (last_marginalization_info && last_marginalization_info->valid)
     {
         // construct new marginlization_factor
+        //使用last_marginalization_info构造一个新的MarginalizationFactor对象
         MarginalizationFactor *marginalization_factor = new MarginalizationFactor(last_marginalization_info);
+        //将构造的边缘化因子添加到Ceres优化问题的残差块中。NULL表示没有损失函数，last_marginalization_parameter_blocks表示与该因子相关的参数块。
         problem.AddResidualBlock(marginalization_factor, NULL,
                                  last_marginalization_parameter_blocks);
     }
+    // 如果使用IMU，为每个帧之间的IMU因子添加残差块
     if(USE_IMU)
     {
         for (int i = 0; i < frame_count; i++)
         {
+            //获取相邻帧的索引
             int j = i + 1;
+            //如果预积分时间pre_integrations[j]->sum_dt超过10秒，则跳过该帧对，不添加IMU因子
             if (pre_integrations[j]->sum_dt > 10.0)
                 continue;
             IMUFactor* imu_factor = new IMUFactor(pre_integrations[j]);
+            //将构造的IMU因子添加到Ceres优化问题的残差块中。NULL表示没有损失函数，para_Pose[i]、para_SpeedBias[i]、para_Pose[j]、para_SpeedBias[j]分别表示与IMU因子相关的当前帧和下一帧的姿态和速度偏差参数块。
             problem.AddResidualBlock(imu_factor, NULL, para_Pose[i], para_SpeedBias[i], para_Pose[j], para_SpeedBias[j]);
         }
     }
 
-    int f_m_cnt = 0;
-    int feature_index = -1;
+    // 遍历每个特征点，添加视觉测量残差块
+    //分单目和双目
+    //单目相机：两个不同帧之间的投影约束（ProjectionTwoFrameOneCamFactor）：当特征点在两个不同的帧中被观测到时，可以通过投影约束来优化这两个帧之间的相对位姿。
+    //双目相机：单帧双目相机的投影约束（ProjectionOneFrameTwoCamFactor）：使用左、右相机的图像坐标以及相机的外参（两个相机之间的相对位置）来优化特征点的三维坐标和相机的外参。
+    //         两个不同帧之间的双目相机投影约束（ProjectionTwoFrameTwoCamFactor）：结合了不同帧的相对位姿和左右相机的外参，可以提供更强的几何约束，从而提高估计的精度。
+    int f_m_cnt = 0;// 用于计数处理的特征点对的数量
+    int feature_index = -1;// 用于记录特征点的索引
+
+    // 遍历每个特征点
     for (auto &it_per_id : f_manager.feature)
     {
+        // 获取特征点在多少帧中被观测到
         it_per_id.used_num = it_per_id.feature_per_frame.size();
+        // 如果特征点的观测次数少于4次，则跳过该特征点
         if (it_per_id.used_num < 4)
             continue;
  
-        ++feature_index;
+        ++feature_index;// 更新特征点索引
 
+        // imu_i是特征点开始的帧索引，imu_j用于遍历其他帧
         int imu_i = it_per_id.start_frame, imu_j = imu_i - 1;
         
+        // 获取特征点在开始帧中的位置
         Vector3d pts_i = it_per_id.feature_per_frame[0].point;
 
+        // 遍历特征点在每一帧中的观测
         for (auto &it_per_frame : it_per_id.feature_per_frame)
         {
-            imu_j++;
+            imu_j++;// 更新当前帧索引
+            // 如果不是开始帧
             if (imu_i != imu_j)
             {
+                // 获取特征点在当前帧中的位置
                 Vector3d pts_j = it_per_frame.point;
+                // 添加单目相机的投影约束
                 ProjectionTwoFrameOneCamFactor *f_td = new ProjectionTwoFrameOneCamFactor(pts_i, pts_j, it_per_id.feature_per_frame[0].velocity, it_per_frame.velocity,
                                                                  it_per_id.feature_per_frame[0].cur_td, it_per_frame.cur_td);
                 problem.AddResidualBlock(f_td, loss_function, para_Pose[imu_i], para_Pose[imu_j], para_Ex_Pose[0], para_Feature[feature_index], para_Td[0]);
             }
-
+            
+            // 如果是双目相机，并且当前帧有双目观测
             if(STEREO && it_per_frame.is_stereo)
-            {                
+            {    
+                // 获取特征点在右相机中的位置            
                 Vector3d pts_j_right = it_per_frame.pointRight;
+                // 如果不是开始帧
                 if(imu_i != imu_j)
                 {
+                    // 添加双目相机的投影约束
                     ProjectionTwoFrameTwoCamFactor *f = new ProjectionTwoFrameTwoCamFactor(pts_i, pts_j_right, it_per_id.feature_per_frame[0].velocity, it_per_frame.velocityRight,
-                                                                 it_per_id.feature_per_frame[0].cur_td, it_per_frame.cur_td);
+                                                                it_per_id.feature_per_frame[0].cur_td, it_per_frame.cur_td);
                     problem.AddResidualBlock(f, loss_function, para_Pose[imu_i], para_Pose[imu_j], para_Ex_Pose[0], para_Ex_Pose[1], para_Feature[feature_index], para_Td[0]);
+                    
+                    
                 }
-                else
+                else// 如果是开始帧
                 {
+                    // 添加单帧双目相机的投影约束
                     ProjectionOneFrameTwoCamFactor *f = new ProjectionOneFrameTwoCamFactor(pts_i, pts_j_right, it_per_id.feature_per_frame[0].velocity, it_per_frame.velocityRight,
                                                                  it_per_id.feature_per_frame[0].cur_td, it_per_frame.cur_td);
                     problem.AddResidualBlock(f, loss_function, para_Ex_Pose[0], para_Ex_Pose[1], para_Feature[feature_index], para_Td[0]);
                 }
                
             }
-            f_m_cnt++;
+            f_m_cnt++;// 更新处理的特征点对的计数
         }
     }
 
     ROS_DEBUG("visual measurement count: %d", f_m_cnt);
     //printf("prepare for ceres: %f \n", t_prepare.toc());
 
+
+    // 配置Ceres求解器选项
+    //创建一个ceres::Solver::Options对象options来配置求解器的选项
     ceres::Solver::Options options;
 
+    //设置线性求解器类型为DENSE_SCHUR，适用于结构化稀疏矩阵的求解
     options.linear_solver_type = ceres::DENSE_SCHUR;
     //options.num_threads = 2;
+
+    //设置信赖域策略类型为DOGLEG，这是一种优化算法
     options.trust_region_strategy_type = ceres::DOGLEG;
     options.max_num_iterations = NUM_ITERATIONS;
     //options.use_explicit_schur_complement = true;
     //options.minimizer_progress_to_stdout = true;
     //options.use_nonmonotonic_steps = true;
+
+    //根据边缘化标志marginalization_flag，设置求解器的最大运行时间。如果是旧的边缘化（MARGIN_OLD），则时间为SOLVER_TIME的4/5，否则为SOLVER_TIME。
     if (marginalization_flag == MARGIN_OLD)
         options.max_solver_time_in_seconds = SOLVER_TIME * 4.0 / 5.0;
     else
         options.max_solver_time_in_seconds = SOLVER_TIME;
+        
+    //创建一个TicToc对象t_solver来记录求解过程的时间
     TicToc t_solver;
     ceres::Solver::Summary summary;
     ceres::Solve(options, &problem, &summary);

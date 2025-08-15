@@ -45,7 +45,7 @@ int MIN_DIST;
 double F_THRESHOLD;
 int SHOW_TRACK;
 int FLOW_BACK;
-
+bool USE_DYNAMIC_WEIGHTING; 
 
 template <typename T>
 T readParam(ros::NodeHandle &n, std::string name)
