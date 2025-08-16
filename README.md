@@ -68,18 +68,20 @@ source ~/catkin_ws/devel/setup.bash
 
 **於「FGI 建築周遭資料集」上執行：**
 ```bash
-# 分別開啟三個終端機執行 rviz, VINS 節點, 以及 rosbag
+# 分別開啟四個終端機執行 rviz, VINS 節點, 以及 rosbag
 roslaunch vins vins_rviz.launch
-rosrun vins vins_node path/to/your_config/fgi_config.yaml 
-rosbag play YOUR_DATASET_FOLDER/fgi_40m_2ms.bag
+rosrun vins vins_node path/to/your_config/FGI_Masala/FGI_Masala_Stereo_mono8_config.yaml
+rosrun loop_fusion loop_fusion_node path/to/your_config/FGI_Masala/FGI_Masala_Stereo_mono8_config.yaml  
+rosbag play YOUR_DATASET_FOLDER/40_2.bag
 ```
 
 **於「多樣化戶外場景資料集」上執行：**
 ```bash
-# 分別開啟三個終端機執行 rviz, VINS 節點, 以及 rosbag
+# 分別開啟四個終端機執行 rviz, VINS 節點, 以及 rosbag
 roslaunch vins vins_rviz.launch
-rosrun vins vins_node path/to/your_config/diverse_outdoor_config.yaml 
-rosbag play YOUR_DATASET_FOLDER/diverse_50m_5ms.bag
+rosrun vins vins_node path/to/your_config/low_altitude/nav_stereo_imu.yaml
+rosrun loop_fusion loop_fusion_node path/to/your_config/low_altitude/nav_stereo_imu.yaml
+rosbag play YOUR_DATASET_FOLDER/0628_50_5.bag
 ```
 
 ### 3.3 執行消融實驗 (Ablation Study)
