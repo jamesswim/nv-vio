@@ -100,7 +100,7 @@ rosbag play YOUR_DATASET_FOLDER/0628_50_5.bag
 * 音樂公園
 * 國立臺北科技大學操場
 
-資料集（包含感測器數據 `.bag`、地面真值軌跡 `.kml` 及校正檔 `.yaml`）已包含在 GitHub 專案中。您可以使用專案內提供的設定檔來執行 VINS。
+資料集（包含感測器數據 `.bag`、真實軌跡 `.kml` 及校正檔 `.yaml`）
 
 ## 5. 原始文件與致謝
 關於在其他資料集（如 EuRoC, KITTI）或您自己的設備上運行的說明，請參考原始 [VINS-Fusion 專案](https://github.com/HKUST-Aerial-Robotics/VINS-Fusion) 的文件。
