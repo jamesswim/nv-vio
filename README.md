@@ -49,7 +49,7 @@
 編譯流程與原始 VINS-Fusion 相同。
 ```bash
 cd ~/catkin_ws/src
-git clone [https://github.com/jamesswim/VINS-Fusion.git](https://github.com/jamesswim/VINS-Fusion.git)
+git clone https://github.com/jamesswim/VINS-Fusion.git
 cd ../
 catkin_make
 source ~/catkin_ws/devel/setup.bash
