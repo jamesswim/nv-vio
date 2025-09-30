@@ -39,10 +39,10 @@ This version inherits all the functionalities of the original VINS-Fusion and ad
 ## 1. Prerequisites
 ### 1.1 **Ubuntu** and **ROS**
 * Ubuntu 64-bit 16.04 or 18.04。
-* ROS Kinetic or Melodic。[ROS 安裝指引](http://wiki.ros.org/ROS/Installation)
+* ROS Kinetic or Melodic。[ROS Installation Guide](http://wiki.ros.org/ROS/Installation)
 
 ### 1.2. **Ceres Solver**
-* Please follow the [Ceres 安裝指引](http://ceres-solver.org/installation.html) for installation.
+* Please follow the [Ceres Installation Guide](http://ceres-solver.org/installation.html) for installation.
 
 ## 2. Build Instructions
 The build process is identical to the original VINS-Fusion.
@@ -102,7 +102,7 @@ This research contributes a new downward-looking UAV dataset, collected at locat
 The dataset (including sensor data `.bag`, ground truth trajectory `.kml` , and calibration files  `.yaml`) is available for download.
 
 ## 5. Original Documentation & Acknowledgements
-For instructions on running the system on other datasets (e.g., EuRoC, KITTI) or with your own equipment, please refer to the documentation of the original  [VINS-Fusion 專案](https://github.com/HKUST-Aerial-Robotics/VINS-Fusion) .
+For instructions on running the system on other datasets (e.g., EuRoC, KITTI) or with your own equipment, please refer to the documentation of the original  [VINS-Fusion project](https://github.com/HKUST-Aerial-Robotics/VINS-Fusion) .
 
 This project uses [Ceres Solver](http://ceres-solver.org/) for non-linear optimization and [DBoW2](https://github.com/dorian3d/DBoW2) for loop closure detection. We thank the original authors of VINS-Fusion for their outstanding work.
 
